@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>參加者填寫 - 餐會自動分桌</title>
+  <link rel="stylesheet" href="./assets/app.css">
+</head>
+<body>
+  <main class="container">
+    <h1>參加者填寫頁面</h1>
+    <p>輸入名稱後會立即分配桌次，且結果不可自行修改。</p>
+
+    <section class="card">
+      <label for="eventId">活動代碼</label>
+      <input id="eventId" placeholder="例如: dinner2026">
+
+      <label for="nameInput">你的名稱</label>
+      <input id="nameInput" placeholder="請輸入名稱">
+
+      <div class="btn-row">
+        <button id="submitBtn">送出並自動分桌</button>
+        <a class="link-btn" href="./index.html">回首頁</a>
+      </div>
+
+      <div id="status" class="status info" hidden></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { registerParticipant } from "./assets/firebase.js";
+
+    const eventIdEl = document.getElementById("eventId");
+    const nameInputEl = document.getElementById("nameInput");
+    const submitBtn = document.getElementById("submitBtn");
+    const statusEl = document.getElementById("status");
+
+    const params = new URLSearchParams(window.location.search);
+    eventIdEl.value = (params.get("event") || "").trim().toLowerCase();
+
+    function showStatus(type, message) {
+      statusEl.hidden = false;
+      statusEl.className = `status ${type}`;
+      statusEl.textContent = message;
+    }
+
+    function normalizeName(name) {
+      return name.trim().replace(/\s+/g, " ");
+    }
+
+    submitBtn.addEventListener("click", async () => {
+      const eventId = eventIdEl.value.trim().toLowerCase();
+      const name = normalizeName(nameInputEl.value);
+
+      if (!eventId) {
+        showStatus("error", "請輸入活動代碼。");
+        return;
+      }
+      if (!name) {
+        showStatus("error", "請輸入名稱。");
+        return;
+      }
+
+      submitBtn.disabled = true;
+      try {
+        const assignedGroup = await registerParticipant({ eventId, name });
+        showStatus("success", `${name} 已完成報到，分配到第 ${assignedGroup} 組。`);
+        nameInputEl.value = "";
+      } catch (error) {
+        showStatus("error", error.message || "送出失敗。");
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

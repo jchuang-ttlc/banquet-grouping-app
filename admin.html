@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理者頁面 - 餐會自動分桌</title>
+  <link rel="stylesheet" href="./assets/app.css">
+</head>
+<body>
+  <main class="container">
+    <h1>管理者結果頁</h1>
+    <p>可檢視目前分組結果、下載 CSV，或手動關閉活動。</p>
+
+    <section class="card">
+      <div class="row two">
+        <div>
+          <label for="eventId">活動代碼</label>
+          <input id="eventId" placeholder="例如: dinner2026">
+        </div>
+        <div>
+          <label for="adminCode">管理密碼</label>
+          <input id="adminCode" type="password" placeholder="請輸入管理密碼">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button id="loadBtn">載入結果</button>
+        <button id="closeBtn" class="danger">關閉活動</button>
+        <button id="downloadBtn" class="secondary">下載 CSV</button>
+        <a class="link-btn" href="./index.html">回首頁</a>
+      </div>
+      <div id="status" class="status info" hidden></div>
+    </section>
+
+    <section class="card">
+      <h2>分組列表</h2>
+      <div id="summary"></div>
+      <div id="groupContainer" class="group-grid"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { getAllParticipants, closeEvent } from "./assets/firebase.js";
+
+    const eventIdEl = document.getElementById("eventId");
+    const adminCodeEl = document.getElementById("adminCode");
+    const loadBtn = document.getElementById("loadBtn");
+    const closeBtn = document.getElementById("closeBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const statusEl = document.getElementById("status");
+    const summaryEl = document.getElementById("summary");
+    const groupContainerEl = document.getElementById("groupContainer");
+
+    const params = new URLSearchParams(window.location.search);
+    eventIdEl.value = (params.get("event") || "").trim().toLowerCase();
+
+    let currentData = null;
+
+    function showStatus(type, message) {
+      statusEl.hidden = false;
+      statusEl.className = `status ${type}`;
+      statusEl.textContent = message;
+    }
+
+    function renderGroups(data) {
+      const { event, participants } = data;
+      const groups = Array.from({ length: event.groupCount }, (_, idx) => ({
+        group: idx + 1,
+        capacity: Array.isArray(event.tableCapacities) ? Number(event.tableCapacities[idx] || 0) : Number(event.seatsPerGroup || 0),
+        members: []
+      }));
+      participants.forEach((p) => {
+        const g = groups[p.assignedGroup - 1];
+        if (g) {
+          g.members.push(p.name);
+        }
+      });
+
+      summaryEl.innerHTML = `<p>目前 ${participants.length} / ${event.totalSeats} 人，狀態：<strong>${event.status}</strong></p>`;
+      groupContainerEl.innerHTML = groups
+        .map((g) => {
+          const members = g.members.length ? g.members.map((name) => `<li>${name}</li>`).join("") : "<li>尚無</li>";
+          return `<div class="card"><h3>第 ${g.group} 組（上限 ${g.capacity} 人）</h3><ul>${members}</ul></div>`;
+        })
+        .join("");
+    }
+
+    function toCsv(data) {
+      const header = ["name", "assignedGroup", "createdAt"];
+      const rows = data.participants.map((p) => [
+        p.name,
+        String(p.assignedGroup),
+        new Date(p.createdAt).toISOString()
+      ]);
+      return [header, ...rows]
+        .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, "\"\"")}"`).join(","))
+        .join("\n");
+    }
+
+    function downloadCsvFile(filename, content) {
+      const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function loadData() {
+      const eventId = eventIdEl.value.trim().toLowerCase();
+      const adminCode = adminCodeEl.value.trim();
+      if (!eventId || !adminCode) {
+        showStatus("error", "請輸入活動代碼與管理密碼。");
+        return;
+      }
+      loadBtn.disabled = true;
+      try {
+        currentData = await getAllParticipants(eventId, adminCode);
+        renderGroups(currentData);
+        showStatus("success", "資料已更新。");
+      } catch (error) {
+        showStatus("error", error.message || "載入失敗。");
+      } finally {
+        loadBtn.disabled = false;
+      }
+    }
+
+    loadBtn.addEventListener("click", loadData);
+
+    closeBtn.addEventListener("click", async () => {
+      const eventId = eventIdEl.value.trim().toLowerCase();
+      const adminCode = adminCodeEl.value.trim();
+      if (!eventId || !adminCode) {
+        showStatus("error", "請先輸入活動代碼與管理密碼。");
+        return;
+      }
+      closeBtn.disabled = true;
+      try {
+        await closeEvent(eventId, adminCode);
+        showStatus("success", "活動已關閉，參加者無法再新增。");
+        await loadData();
+      } catch (error) {
+        showStatus("error", error.message || "關閉失敗。");
+      } finally {
+        closeBtn.disabled = false;
+      }
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      if (!currentData) {
+        showStatus("error", "請先載入資料後再下載。");
+        return;
+      }
+      const eventId = eventIdEl.value.trim().toLowerCase();
+      const csv = toCsv(currentData);
+      downloadCsvFile(`${eventId}-participants.csv`, csv);
+      showStatus("success", "已下載 CSV。");
+    });
+  </script>
+</body>
+</html>

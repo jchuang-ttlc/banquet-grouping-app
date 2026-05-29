@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>設定活動 - 餐會自動分桌</title>
+  <link rel="stylesheet" href="./assets/app.css">
+</head>
+<body>
+  <main class="container">
+    <h1>設定活動</h1>
+    <p>設定完成後，將參加者連結分享出去即可開始自動分桌。</p>
+
+    <section class="card">
+      <div class="row two">
+        <div>
+          <label for="eventId">活動代碼（英數）</label>
+          <input id="eventId" placeholder="例如: dinner2026">
+        </div>
+        <div>
+          <label for="adminCode">管理密碼</label>
+          <input id="adminCode" type="password" placeholder="至少 6 碼">
+        </div>
+      </div>
+
+      <div>
+        <label for="groupCount">桌數</label>
+        <input id="groupCount" type="number" min="1" max="50" value="6">
+      </div>
+      <div>
+        <label>每桌人數（可不同）</label>
+        <div id="tableSeatsContainer" class="row two"></div>
+      </div>
+
+      <div class="btn-row">
+        <button id="createBtn">建立活動</button>
+        <a class="link-btn" href="./index.html">回首頁</a>
+      </div>
+
+      <div id="status" class="status info" hidden></div>
+    </section>
+
+    <section class="card">
+      <h2>建立後連結</h2>
+      <p>建立成功後會顯示可分享給參加者與管理者的網址。</p>
+      <ul>
+        <li>參加者填寫：<span id="joinLink" class="mono">尚未建立</span></li>
+        <li>管理者結果：<span id="adminLink" class="mono">尚未建立</span></li>
+      </ul>
+    </section>
+  </main>
+
+  <script type="module">
+    import { saveEventConfig } from "./assets/firebase.js";
+
+    const eventIdEl = document.getElementById("eventId");
+    const adminCodeEl = document.getElementById("adminCode");
+    const groupCountEl = document.getElementById("groupCount");
+    const tableSeatsContainerEl = document.getElementById("tableSeatsContainer");
+    const createBtn = document.getElementById("createBtn");
+    const statusEl = document.getElementById("status");
+    const joinLinkEl = document.getElementById("joinLink");
+    const adminLinkEl = document.getElementById("adminLink");
+
+    function showStatus(type, message) {
+      statusEl.hidden = false;
+      statusEl.className = `status ${type}`;
+      statusEl.textContent = message;
+    }
+
+    function sanitizeEventId(raw) {
+      return raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    }
+
+    function renderSeatInputs() {
+      const groupCount = Math.max(1, Math.min(50, Number(groupCountEl.value) || 1));
+      groupCountEl.value = groupCount;
+      const existing = Array.from(tableSeatsContainerEl.querySelectorAll("input")).map((el) => Number(el.value) || 8);
+      tableSeatsContainerEl.innerHTML = "";
+      for (let i = 0; i < groupCount; i += 1) {
+        const wrap = document.createElement("div");
+        const label = document.createElement("label");
+        label.setAttribute("for", `seat-${i + 1}`);
+        label.textContent = `第 ${i + 1} 桌`;
+        const input = document.createElement("input");
+        input.id = `seat-${i + 1}`;
+        input.type = "number";
+        input.min = "1";
+        input.max = "30";
+        input.value = String(existing[i] || 8);
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        tableSeatsContainerEl.appendChild(wrap);
+      }
+    }
+
+    createBtn.addEventListener("click", async () => {
+      const eventId = sanitizeEventId(eventIdEl.value);
+      const adminCode = adminCodeEl.value.trim();
+      const groupCount = Number(groupCountEl.value);
+      const tableCapacities = Array.from(tableSeatsContainerEl.querySelectorAll("input")).map((el) => Number(el.value));
+
+      if (!eventId) {
+        showStatus("error", "請填寫合法活動代碼（僅英數、底線、連字號）。");
+        return;
+      }
+      if (adminCode.length < 6) {
+        showStatus("error", "管理密碼至少 6 碼。");
+        return;
+      }
+      if (groupCount < 1) {
+        showStatus("error", "桌數必須大於 0。");
+        return;
+      }
+      if (tableCapacities.length !== groupCount || tableCapacities.some((n) => !Number.isInteger(n) || n < 1)) {
+        showStatus("error", "請為每一桌填寫至少 1 人的整數容量。");
+        return;
+      }
+
+      createBtn.disabled = true;
+      try {
+        await saveEventConfig({ eventId, adminCode, tableCapacities });
+        const base = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, "/");
+        const joinUrl = `${base}join.html?event=${encodeURIComponent(eventId)}`;
+        const adminUrl = `${base}admin.html?event=${encodeURIComponent(eventId)}`;
+        joinLinkEl.textContent = joinUrl;
+        adminLinkEl.textContent = adminUrl;
+        showStatus("success", "建立成功，請複製連結分享。");
+      } catch (error) {
+        showStatus("error", error.message || "建立失敗。");
+      } finally {
+        createBtn.disabled = false;
+      }
+    });
+
+    groupCountEl.addEventListener("change", renderSeatInputs);
+    renderSeatInputs();
+  </script>
+</body>
+</html>
