@@ -1,18 +1,46 @@
-rules_version='2'
-
+rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2026, 6, 27);
+    match /events/{eventId} {
+      allow create: if request.resource.data.assignedCount == 0
+        && request.resource.data.status == "open"
+        && request.resource.data.tableCapacities is list
+        && request.resource.data.tableCapacities.size() > 0;
+
+      allow read: if true;
+
+      allow update: if resource.data.status == "open"
+        && request.resource.data.assignedCount == resource.data.assignedCount + 1
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.eventId == resource.data.eventId
+        && request.resource.data.adminCode == resource.data.adminCode
+        && request.resource.data.groupCount == resource.data.groupCount
+        && request.resource.data.tableCapacities == resource.data.tableCapacities
+        && request.resource.data.totalSeats == resource.data.totalSeats
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow update: if resource.data.status == "open"
+        && request.resource.data.status == "closed"
+        && request.resource.data.assignedCount == resource.data.assignedCount
+        && request.resource.data.eventId == resource.data.eventId
+        && request.resource.data.adminCode == resource.data.adminCode
+        && request.resource.data.groupCount == resource.data.groupCount
+        && request.resource.data.tableCapacities == resource.data.tableCapacities
+        && request.resource.data.totalSeats == resource.data.totalSeats
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if false;
+    }
+
+    match /events/{eventId}/participants/{participantId} {
+      allow read: if true;
+
+      allow create: if !exists(/databases/$(database)/documents/events/$(eventId)/participants/$(participantId))
+        && request.resource.data.name is string
+        && request.resource.data.assignedGroup is int
+        && request.resource.data.createdAt is int;
+
+      allow update, delete: if false;
     }
   }
 }

@@ -8,7 +8,8 @@ import {
   collection,
   getDocs,
   query,
-  orderBy
+  orderBy,
+  increment
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 // Fill these values with your Firebase project's web app config.
@@ -31,6 +32,29 @@ export function buildEventPath(eventId) {
 
 export function participantsCollection(eventId) {
   return collection(db, `events/${eventId}/participants`);
+}
+
+function resolveTableCapacities(event) {
+  if (Array.isArray(event.tableCapacities) && event.tableCapacities.length > 0) {
+    return event.tableCapacities.map((n) => Number(n) || 0);
+  }
+  const seatsPerGroup = Number(event.seatsPerGroup) || 0;
+  const groupCount = Number(event.groupCount) || 0;
+  if (seatsPerGroup > 0 && groupCount > 0) {
+    return Array.from({ length: groupCount }, () => seatsPerGroup);
+  }
+  return [];
+}
+
+export function getAssignedGroupForCount(count, tableCapacities) {
+  let boundary = 0;
+  for (let i = 0; i < tableCapacities.length; i += 1) {
+    boundary += tableCapacities[i];
+    if (count < boundary) {
+      return i + 1;
+    }
+  }
+  return tableCapacities.length;
 }
 
 export async function saveEventConfig({
@@ -81,29 +105,26 @@ export async function registerParticipant({ eventId, name }) {
       throw new Error("此名稱已報到，請勿重覆輸入。");
     }
 
-    const count = event.assignedCount || 0;
+    const capacities = resolveTableCapacities(event);
+    if (!capacities.length || capacities.some((n) => n < 1)) {
+      throw new Error("活動桌次設定不完整，請由管理者重新建立活動。");
+    }
+
+    const count = Number(event.assignedCount) || 0;
     if (count >= event.totalSeats) {
       throw new Error("所有座位已滿。");
     }
 
-    const capacities = Array.isArray(event.tableCapacities)
-      ? event.tableCapacities
-      : Array.from({ length: event.groupCount }, () => event.seatsPerGroup || 0);
-    let assignedGroup = capacities.length;
-    let prefix = 0;
-    for (let i = 0; i < capacities.length; i += 1) {
-      prefix += Number(capacities[i]) || 0;
-      if (count < prefix) {
-        assignedGroup = i + 1;
-        break;
-      }
-    }
+    const assignedGroup = getAssignedGroupForCount(count, capacities);
+
     transaction.set(participantRef, {
       name,
       assignedGroup,
       createdAt: Date.now()
     });
-    transaction.set(eventRef, { ...event, assignedCount: count + 1 });
+    transaction.update(eventRef, {
+      assignedCount: increment(1)
+    });
 
     return assignedGroup;
   });
@@ -120,7 +141,7 @@ export async function closeEvent(eventId, adminCode) {
     if (event.adminCode !== adminCode) {
       throw new Error("管理密碼錯誤。");
     }
-    transaction.set(eventRef, { ...event, status: "closed" });
+    transaction.update(eventRef, { status: "closed" });
   });
 }
 
