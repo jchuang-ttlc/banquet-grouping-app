@@ -9,7 +9,7 @@
 <body>
   <main class="container">
     <h1>參加者填寫頁面</h1>
-    <p>輸入名稱後會立即分配桌次，且結果不可自行修改。</p>
+    <p>輸入名稱後會隨機分配到仍有空位的桌次（驚喜分桌），且結果不可自行修改。</p>
 
     <section class="card">
       <label for="eventId">活動代碼</label>
@@ -28,7 +28,7 @@
   </main>
 
   <script type="module">
-    import { registerParticipant } from "./assets/firebase.js";
+    import { registerParticipant } from "./assets/firebase.js?v=4";
 
     const eventIdEl = document.getElementById("eventId");
     const nameInputEl = document.getElementById("nameInput");

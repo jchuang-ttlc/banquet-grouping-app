@@ -46,15 +46,31 @@ function resolveTableCapacities(event) {
   return [];
 }
 
-export function getAssignedGroupForCount(count, tableCapacities) {
-  let boundary = 0;
+/** Count how many people are already seated at each table. */
+export function buildTableFillCounts(participantDocs, tableCapacities) {
+  const fillCounts = tableCapacities.map(() => 0);
+  participantDocs.forEach((docSnap) => {
+    const group = Number(docSnap.data().assignedGroup) || 0;
+    if (group >= 1 && group <= tableCapacities.length) {
+      fillCounts[group - 1] += 1;
+    }
+  });
+  return fillCounts;
+}
+
+/** Randomly pick one table that still has an empty seat. */
+export function getRandomAvailableGroup(fillCounts, tableCapacities) {
+  const availableGroups = [];
   for (let i = 0; i < tableCapacities.length; i += 1) {
-    boundary += tableCapacities[i];
-    if (count < boundary) {
-      return i + 1;
+    if (fillCounts[i] < tableCapacities[i]) {
+      availableGroups.push(i + 1);
     }
   }
-  return tableCapacities.length;
+  if (!availableGroups.length) {
+    return null;
+  }
+  const pick = Math.floor(Math.random() * availableGroups.length);
+  return availableGroups[pick];
 }
 
 export async function saveEventConfig({
@@ -88,6 +104,7 @@ export async function getEventConfig(eventId) {
 export async function registerParticipant({ eventId, name }) {
   const eventRef = doc(db, buildEventPath(eventId));
   const participantRef = doc(db, `events/${eventId}/participants/${name.toLowerCase()}`);
+  const participantsQuery = query(participantsCollection(eventId));
 
   return runTransaction(db, async (transaction) => {
     const eventSnap = await transaction.get(eventRef);
@@ -110,12 +127,18 @@ export async function registerParticipant({ eventId, name }) {
       throw new Error("活動桌次設定不完整，請由管理者重新建立活動。");
     }
 
-    const count = Number(event.assignedCount) || 0;
-    if (count >= event.totalSeats) {
+    const participantsSnap = await transaction.get(participantsQuery);
+    const fillCounts = buildTableFillCounts(participantsSnap.docs, capacities);
+    const seatedCount = fillCounts.reduce((sum, n) => sum + n, 0);
+
+    if (seatedCount >= event.totalSeats) {
       throw new Error("所有座位已滿。");
     }
 
-    const assignedGroup = getAssignedGroupForCount(count, capacities);
+    const assignedGroup = getRandomAvailableGroup(fillCounts, capacities);
+    if (!assignedGroup) {
+      throw new Error("所有座位已滿。");
+    }
 
     transaction.set(participantRef, {
       name,
