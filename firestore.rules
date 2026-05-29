@@ -5,23 +5,31 @@ service cloud.firestore {
       allow create: if request.resource.data.assignedCount == 0
         && request.resource.data.status == "open"
         && request.resource.data.tableCapacities is list
-        && request.resource.data.tableCapacities.size() > 0;
+        && request.resource.data.tableCapacities.size() > 0
+        && request.resource.data.tableFillCounts is list
+        && request.resource.data.tableFillCounts.size() == request.resource.data.tableCapacities.size();
 
       allow read: if true;
 
       allow update: if resource.data.status == "open"
-        && request.resource.data.assignedCount == resource.data.assignedCount + 1
         && request.resource.data.status == resource.data.status
         && request.resource.data.eventId == resource.data.eventId
         && request.resource.data.adminCode == resource.data.adminCode
         && request.resource.data.groupCount == resource.data.groupCount
         && request.resource.data.tableCapacities == resource.data.tableCapacities
         && request.resource.data.totalSeats == resource.data.totalSeats
-        && request.resource.data.createdAt == resource.data.createdAt;
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.tableFillCounts is list
+        && request.resource.data.tableFillCounts.size() == resource.data.tableCapacities.size()
+        && (
+          request.resource.data.assignedCount == resource.data.assignedCount + 1
+          || request.resource.data.assignedCount == resource.data.assignedCount
+        );
 
       allow update: if resource.data.status == "open"
         && request.resource.data.status == "closed"
         && request.resource.data.assignedCount == resource.data.assignedCount
+        && request.resource.data.tableFillCounts == resource.data.tableFillCounts
         && request.resource.data.eventId == resource.data.eventId
         && request.resource.data.adminCode == resource.data.adminCode
         && request.resource.data.groupCount == resource.data.groupCount

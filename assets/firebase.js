@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
   runTransaction,
   collection,
   getDocs,
@@ -46,6 +47,13 @@ function resolveTableCapacities(event) {
   return [];
 }
 
+function getFillCountsFromEvent(event, capacities) {
+  if (Array.isArray(event.tableFillCounts) && event.tableFillCounts.length === capacities.length) {
+    return event.tableFillCounts.map((n) => Number(n) || 0);
+  }
+  return capacities.map(() => 0);
+}
+
 /** Count how many people are already seated at each table. */
 export function buildTableFillCounts(participantDocs, tableCapacities) {
   const fillCounts = tableCapacities.map(() => 0);
@@ -73,6 +81,35 @@ export function getRandomAvailableGroup(fillCounts, tableCapacities) {
   return availableGroups[pick];
 }
 
+/** Sync per-table counts for older events (e.g. dinner2017). */
+async function ensureTableFillCountsSynced(eventId) {
+  const eventRef = doc(db, buildEventPath(eventId));
+  const eventSnap = await getDoc(eventRef);
+  if (!eventSnap.exists()) {
+    return;
+  }
+
+  const event = eventSnap.data();
+  const capacities = resolveTableCapacities(event);
+  if (!capacities.length) {
+    return;
+  }
+
+  const stored = event.tableFillCounts;
+  const storedSum = Array.isArray(stored)
+    ? stored.reduce((sum, n) => sum + (Number(n) || 0), 0)
+    : -1;
+  const assignedCount = Number(event.assignedCount) || 0;
+
+  if (Array.isArray(stored) && stored.length === capacities.length && storedSum === assignedCount) {
+    return;
+  }
+
+  const participantsSnap = await getDocs(participantsCollection(eventId));
+  const fillCounts = buildTableFillCounts(participantsSnap.docs, capacities);
+  await updateDoc(eventRef, { tableFillCounts: fillCounts });
+}
+
 export async function saveEventConfig({
   eventId,
   adminCode,
@@ -85,6 +122,7 @@ export async function saveEventConfig({
     adminCode,
     groupCount: normalizedCapacities.length,
     tableCapacities: normalizedCapacities,
+    tableFillCounts: normalizedCapacities.map(() => 0),
     totalSeats: normalizedCapacities.reduce((sum, n) => sum + n, 0),
     assignedCount: 0,
     createdAt: Date.now(),
@@ -102,9 +140,19 @@ export async function getEventConfig(eventId) {
 }
 
 export async function registerParticipant({ eventId, name }) {
-  const eventRef = doc(db, buildEventPath(eventId));
-  const participantRef = doc(db, `events/${eventId}/participants/${name.toLowerCase()}`);
-  const participantsQuery = query(participantsCollection(eventId));
+  const normalizedEventId = eventId.trim().toLowerCase();
+  const normalizedName = name.trim().replace(/\s+/g, " ");
+  if (!normalizedEventId || !normalizedName) {
+    throw new Error("活動代碼與名稱不可為空。");
+  }
+
+  await ensureTableFillCountsSynced(normalizedEventId);
+
+  const eventRef = doc(db, buildEventPath(normalizedEventId));
+  const participantRef = doc(
+    db,
+    `events/${normalizedEventId}/participants/${normalizedName.toLowerCase()}`
+  );
 
   return runTransaction(db, async (transaction) => {
     const eventSnap = await transaction.get(eventRef);
@@ -127,8 +175,7 @@ export async function registerParticipant({ eventId, name }) {
       throw new Error("活動桌次設定不完整，請由管理者重新建立活動。");
     }
 
-    const participantsSnap = await transaction.get(participantsQuery);
-    const fillCounts = buildTableFillCounts(participantsSnap.docs, capacities);
+    const fillCounts = getFillCountsFromEvent(event, capacities);
     const seatedCount = fillCounts.reduce((sum, n) => sum + n, 0);
 
     if (seatedCount >= event.totalSeats) {
@@ -140,12 +187,16 @@ export async function registerParticipant({ eventId, name }) {
       throw new Error("所有座位已滿。");
     }
 
+    const nextFillCounts = [...fillCounts];
+    nextFillCounts[assignedGroup - 1] += 1;
+
     transaction.set(participantRef, {
-      name,
+      name: normalizedName,
       assignedGroup,
       createdAt: Date.now()
     });
     transaction.update(eventRef, {
+      tableFillCounts: nextFillCounts,
       assignedCount: increment(1)
     });
 
